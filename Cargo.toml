@@ -1,0 +1,17 @@
+[package]
+name = "restty"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.74"
+description = "Responsive, safety-first terminal output formatter"
+license = "MIT"
+keywords = ["cli", "terminal", "table", "formatter"]
+categories = ["command-line-utilities"]
+
+[dependencies]
+unicode-width = "0.2"
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = true

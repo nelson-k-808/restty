@@ -1,0 +1,27 @@
+# Commands for which `restty init` emits safe shell wrappers.
+enabled_commands = ["ls", "ps", "df", "du", "git", "docker", "lsblk", "free", "ip"]
+disabled_parsers = []
+
+# Inputs beyond either limit are emitted byte-for-byte without parsing.
+max_lines = 10000
+max_bytes = 8388608
+min_confidence = 0.72
+
+# `none` keeps responsive layout but disables restty's ANSI colors.
+theme = "default"
+border_style = "rounded" # rounded, sharp, ascii, or none
+
+[breakpoints]
+compact = 60
+core = 100
+wide = 160
+
+# Lower numbers survive at narrower widths. Column keys are documented in README.md.
+[columns.ls]
+name = 0
+size = 1
+modified = 1
+mode = 2
+owner = 2
+group = 3
+links = 3

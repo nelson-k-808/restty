@@ -1,0 +1,5 @@
+NAME   MAJ:MIN RM   SIZE RO TYPE MOUNTPOINTS
+sda      8:0    0 388.4M  1 disk
+sdc      8:32   0     4G  0 disk [SWAP]
+sdd      8:48   0     1T  0 disk /home/alice
+                              /srv/data

@@ -1,0 +1,4 @@
+total 20
+drwxr-xr-x  2 alice staff 4096 Sep  3 12:20 src
+-rw-r--r--  1 alice staff 1280 Sep  2 09:01 Cargo.toml
+lrwxrwxrwx  1 alice staff   10 Aug 31 17:42 latest -> releases/v1

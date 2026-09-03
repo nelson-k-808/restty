@@ -1,0 +1,126 @@
+=== case 0 source=ls width=48 ===
+total 20
+src
+Cargo.toml
+latest -> releases/v1
+=== case 0 source=ls width=80 ===
+total 20
+SIZE MODIFIED     NAME
+4096 Sep 3 12:20  src
+1280 Sep 2 09:01  Cargo.toml
+  10 Aug 31 17:42 latest -> releases/v1
+=== case 0 source=ls width=120 ===
+total 20
+MODE        LINKS  OWNER  GROUP  SIZE  MODIFIED      NAME
+drwxr-xr-x      2  alice  staff  4096  Sep 3 12:20   src
+-rw-r--r--      1  alice  staff  1280  Sep 2 09:01   Cargo.toml
+lrwxrwxrwx      1  alice  staff    10  Aug 31 17:42  latest -> releases/v1
+=== case 1 source=ps width=48 ===
+/sbin/init
+cargo test --workspace
+=== case 1 source=ps width=80 ===
+USER   PID %CPU %MEM COMMAND
+root     1  0.0  0.1 /sbin/init
+alice 4242 12.5  2.4 cargo test --workspace
+=== case 1 source=ps width=120 ===
+USER    PID  %CPU  %MEM     VSZ    RSS  TTY    STAT  START  TIME  COMMAND
+root      1   0.0   0.1  168900  11200  ?      Ss    10:00  0:02  /sbin/init
+alice  4242  12.5   2.4  900000  81000  pts/0  Sl+   12:14  1:08  cargo test --workspace
+=== case 2 source=df width=48 ===
+/
+/run/user/1000
+=== case 2 source=df width=80 ===
+FILESYSTEM     Use% MOUNTED ON
+/dev/nvme0n1p2  90% /
+tmpfs            1% /run/user/1000
+=== case 2 source=df width=120 ===
+FILESYSTEM      Size  USED  AVAILABLE  Use%  MOUNTED ON
+/dev/nvme0n1p2  220G  187G        22G   90%  /
+tmpfs            16G   24M        16G    1%  /run/user/1000
+=== case 3 source=du width=48 ===
+./src/parser
+./target/doc
+./target
+=== case 3 source=du width=80 ===
+SIZE PATH
+4.0K ./src/parser
+120K ./target/doc
+1.8G ./target
+=== case 3 source=du width=120 ===
+SIZE  PATH
+4.0K  ./src/parser
+120K  ./target/doc
+1.8G  ./target
+=== case 4 source=git width=48 ===
+src/main.rs
+src/render.rs
+tests/fixtures/new file.txt
+=== case 4 source=git width=80 ===
+STATUS PATH
+ M     src/main.rs
+A      src/render.rs
+??     tests/fixtures/new file.txt
+=== case 4 source=git width=120 ===
+STATUS  PATH
+ M      src/main.rs
+A       src/render.rs
+??      tests/fixtures/new file.txt
+=== case 5 source=git width=48 ===
+Add responsive column selection
+Preserve bytes when parsing is uncertain
+Document bash and zsh installation
+=== case 5 source=git width=80 ===
+COMMIT  SUBJECT
+abc1234 Add responsive column selection
+def5678 Preserve bytes when parsing is uncertain
+012cafe Document bash and zsh installation
+=== case 5 source=git width=120 ===
+COMMIT   SUBJECT
+abc1234  Add responsive column selection
+def5678  Preserve bytes when parsing is uncertain
+012cafe  Document bash and zsh installation
+=== case 6 source=docker width=48 ===
+database
+cache
+=== case 6 source=docker width=80 ===
+CONTAINER ID IMAGE       STATUS                  NAMES
+a1b2c3d4e5f6 postgres:16 Up 2 hours (healthy)    database
+f6e5d4c3b2a1 redis:7     Exited (1) 1 minute ago cache
+=== case 6 source=docker width=120 ===
+CONTAINER ID  IMAGE        COMMAND                 CREATED        STATUS                 PORTS                  NAMES
+a1b2c3d4e5f6  postgres:16  "docker-entrypoint.s…"  2 hours ago    Up 2 hours (healthy)   0.0.0.0:5432->5432/t…  database
+f6e5d4c3b2a1  redis:7      "redis-server"          3 minutes ago  Exited (1) 1 minute …                         cache
+=== case 7 source=generic width=48 ===
+api-server
+worker-long
+=== case 7 source=generic width=80 ===
+NAME        READY
+api-server  1/1
+worker-long 0/1
+=== case 7 source=generic width=120 ===
+NAME         READY  AGE  RESTARTS
+api-server   1/1    12m         0
+worker-long  0/1    3d         14
+=== case 8 source=generic width=48 ===
+2026-09-03T12:00:01Z INFO server started on por…
+2026-09-03T12:00:02Z WARN request latency excee…
+2026-09-03T12:00:03Z ERROR database connection …
+=== case 8 source=generic width=80 ===
+2026-09-03T12:00:01Z INFO  server started on port 8080
+2026-09-03T12:00:02Z WARN  request latency exceeded budget
+2026-09-03T12:00:03Z ERROR database connection failed
+=== case 8 source=generic width=120 ===
+2026-09-03T12:00:01Z INFO  server started on port 8080
+2026-09-03T12:00:02Z WARN  request latency exceeded budget
+2026-09-03T12:00:03Z ERROR database connection failed
+=== case 9 source=df width=48 ===
+/
+/dev
+=== case 9 source=df width=80 ===
+FILESYSTEM  Capacity MOUNTED ON
+/dev/ada0p2      47% /
+devfs           100% /dev
+=== case 9 source=df width=120 ===
+FILESYSTEM   512-blocks       USED  AVAILABLE  Capacity    iused    ifree  %iused  MOUNTED ON
+/dev/ada0p2   976490576  421993344  476378112       47%  1928441  9141923     17%  /
+devfs                 2          2          0      100%        0        0       -  /dev

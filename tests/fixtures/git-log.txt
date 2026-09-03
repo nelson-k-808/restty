@@ -1,0 +1,3 @@
+abc1234 Add responsive column selection
+def5678 Preserve bytes when parsing is uncertain
+012cafe Document bash and zsh installation

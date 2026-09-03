@@ -1,0 +1,3 @@
+Filesystem  512-blocks      Used Available Capacity  iused   ifree %iused  Mounted on
+/dev/ada0p2   976490576 421993344 476378112    47% 1928441 9141923   17%   /
+devfs                 2         2         0   100%       0       0     -   /dev

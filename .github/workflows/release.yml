@@ -1,0 +1,72 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  build-unix:
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-musl
+            packages: musl-tools
+          - os: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-musl
+            packages: musl-tools
+          - os: macos-13
+            target: x86_64-apple-darwin
+            packages: ""
+          - os: macos-14
+            target: aarch64-apple-darwin
+            packages: ""
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - if: matrix.packages != ''
+        run: sudo apt-get update && sudo apt-get install -y ${{ matrix.packages }}
+      - run: cargo build --release --locked --target ${{ matrix.target }}
+      - name: Package
+        run: tar -C target/${{ matrix.target }}/release -czf restty-${{ matrix.target }}.tar.gz restty
+      - uses: actions/upload-artifact@v4
+        with:
+          name: restty-${{ matrix.target }}
+          path: restty-${{ matrix.target }}.tar.gz
+
+  build-freebsd:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build in FreeBSD VM
+        uses: vmactions/freebsd-vm@v1
+        with:
+          usesh: true
+          prepare: pkg install -y rust
+          run: |
+            cargo build --release --locked
+            tar -C target/release -czf restty-x86_64-unknown-freebsd.tar.gz restty
+      - uses: actions/upload-artifact@v4
+        with:
+          name: restty-x86_64-unknown-freebsd
+          path: restty-x86_64-unknown-freebsd.tar.gz
+
+  publish:
+    needs: [build-unix, build-freebsd]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          merge-multiple: true
+      - run: sha256sum restty-*.tar.gz > checksums.txt
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            restty-*.tar.gz
+            checksums.txt
