@@ -1,4 +1,4 @@
-use crate::model::{Cell, Column, Style, View};
+use crate::model::{Cell, Column, Style, ValueType, View};
 
 use super::util::{
     aligned_starts, col, is_month, is_permissions, num_col, split_at_starts,
@@ -72,12 +72,12 @@ impl Parser for LsParser {
         }
         let mut parsed = table(
             vec![
-                col("mode", "MODE", 2),
+                col("mode", "MODE", 2).with_value_type(ValueType::Permissions),
                 num_col("links", "LINKS", 3),
                 col("owner", "OWNER", 2),
                 col("group", "GROUP", 3),
                 num_col("size", "SIZE", 1),
-                col("modified", "MODIFIED", 1),
+                col("modified", "MODIFIED", 1).with_value_type(ValueType::Timestamp),
                 col("name", "NAME", 0),
             ],
             rows,
@@ -142,10 +142,15 @@ impl Parser for PsParser {
                     "STAT" | "START" | "STARTED" | "TIME" => 2,
                     _ => 3,
                 };
-                if matches!(upper.as_str(), "PID" | "%CPU" | "%MEM" | "VSZ" | "RSS") {
+                let column = if matches!(upper.as_str(), "PID" | "%CPU" | "%MEM" | "VSZ" | "RSS") {
                     num_col(&upper.to_ascii_lowercase(), &upper, priority)
                 } else {
                     col(&upper.to_ascii_lowercase(), &upper, priority)
+                };
+                if matches!(upper.as_str(), "%CPU" | "%MEM") {
+                    column.with_value_type(ValueType::Percentage)
+                } else {
+                    column
                 }
             })
             .collect();
@@ -247,7 +252,7 @@ impl Parser for DfParser {
                 } else {
                     2
                 };
-                Column::new(
+                let column = Column::new(
                     &key,
                     &display,
                     priority,
@@ -256,7 +261,13 @@ impl Parser for DfParser {
                     } else {
                         crate::model::Alignment::Right
                     },
-                )
+                );
+                if lower.contains("use%") || lower.contains("capacity") || lower.contains("%iused")
+                {
+                    column.with_value_type(ValueType::Percentage)
+                } else {
+                    column
+                }
             })
             .collect();
         Some(View::Table(table(columns, rows)?))

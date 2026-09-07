@@ -1,7 +1,7 @@
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
 use crate::config::Breakpoints;
-use crate::model::{Alignment, Cell, LogRecord, Style, Table, View};
+use crate::model::{Alignment, Cell, ChangeKind, LogRecord, Style, Table, ValueType, View};
 
 #[derive(Debug, Clone, Copy)]
 pub struct RenderOptions {
@@ -9,12 +9,31 @@ pub struct RenderOptions {
     pub color: bool,
     pub breakpoints: Breakpoints,
     pub border_style: BorderStyle,
+    pub palette: ColorPalette,
+    pub truecolor: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ColorPalette {
+    Default,
+    Colorblind,
+}
+
+impl ColorPalette {
+    pub fn from_name(name: &str) -> Self {
+        match name {
+            "colorblind" | "colorblind-safe" => Self::Colorblind,
+            _ => Self::Default,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BorderStyle {
     Rounded,
-    Sharp,
+    Light,
+    Heavy,
+    Double,
     Ascii,
     None,
 }
@@ -23,7 +42,9 @@ impl BorderStyle {
     pub fn from_name(name: &str) -> Self {
         match name {
             "none" => Self::None,
-            "sharp" => Self::Sharp,
+            "light" | "sharp" => Self::Light,
+            "heavy" => Self::Heavy,
+            "double" => Self::Double,
             "ascii" => Self::Ascii,
             _ => Self::Rounded,
         }
@@ -43,7 +64,7 @@ fn render_table(table: &Table, options: &RenderOptions) -> String {
         output.push_str(&paint(
             &truncate(line, options.width),
             Style::Muted,
-            options.color,
+            options,
         ));
         output.push('\n');
     }
@@ -51,21 +72,18 @@ fn render_table(table: &Table, options: &RenderOptions) -> String {
         return output;
     }
 
-    let primary = table
-        .columns
-        .iter()
-        .enumerate()
-        .min_by_key(|(index, column)| (column.priority, *index))
-        .map(|(index, _)| index)
-        .unwrap_or(0);
+    let layout = table_layout(table, options);
+    let primary = layout.selected.first().copied().unwrap_or(0);
 
     if options.width < options.breakpoints.compact && options.border_style == BorderStyle::None {
         for row in &table.rows {
             if let Some(cell) = row.get(primary) {
-                output.push_str(&paint(
-                    &truncate(&cell.text, options.width),
-                    cell.style,
-                    options.color,
+                let value = format_cell_value(&table.columns[primary], cell, options);
+                output.push_str(&paint_typed_cell(
+                    &truncate(&value, options.width),
+                    cell,
+                    &table.columns[primary],
+                    options,
                 ));
                 output.push('\n');
             }
@@ -73,6 +91,58 @@ fn render_table(table: &Table, options: &RenderOptions) -> String {
         return output;
     }
 
+    let selected = layout.selected;
+    let widths = layout.widths;
+    let padding = layout.padding;
+    if options.border_style == BorderStyle::None || options.width < 5 {
+        render_table_line(
+            &mut output,
+            &selected,
+            &widths,
+            padding,
+            |index| Cell::styled(&table.columns[index].label, Style::Muted),
+            table,
+            options,
+        );
+        for row in &table.rows {
+            render_table_line(
+                &mut output,
+                &selected,
+                &widths,
+                padding,
+                |index| row[index].clone(),
+                table,
+                options,
+            );
+        }
+    } else {
+        render_bordered_table(&mut output, table, &selected, &widths, padding, options);
+    }
+    output
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct TableLayout {
+    pub selected: Vec<usize>,
+    pub widths: Vec<usize>,
+    pub padding: usize,
+}
+
+pub(crate) fn table_layout(table: &Table, options: &RenderOptions) -> TableLayout {
+    if table.columns.is_empty() {
+        return TableLayout {
+            selected: Vec::new(),
+            widths: Vec::new(),
+            padding: 1,
+        };
+    }
+    let primary = table
+        .columns
+        .iter()
+        .enumerate()
+        .min_by_key(|(index, column)| (column.priority, *index))
+        .map(|(index, _)| index)
+        .unwrap_or(0);
     let mut selected = if options.width < options.breakpoints.compact {
         vec![primary]
     } else if options.width < options.breakpoints.core {
@@ -86,18 +156,13 @@ fn render_table(table: &Table, options: &RenderOptions) -> String {
         (0..table.columns.len()).collect::<Vec<_>>()
     };
     if selected.is_empty() {
-        selected.push(0);
+        selected.push(primary);
     }
-    let padding = if options.border_style != BorderStyle::None {
-        usize::from(options.width > options.breakpoints.wide) + 1
-    } else if options.width > options.breakpoints.wide {
-        3
-    } else if options.width >= options.breakpoints.core {
-        2
-    } else {
+    let padding = if options.border_style == BorderStyle::None {
         1
+    } else {
+        usize::from(options.width > options.breakpoints.wide) + 1
     };
-
     drop_columns_to_fit(
         table,
         &mut selected,
@@ -105,38 +170,12 @@ fn render_table(table: &Table, options: &RenderOptions) -> String {
         options.width,
         options.border_style,
     );
-    let widths = fitted_widths(
-        table,
-        &selected,
+    let widths = fitted_widths(table, &selected, padding, options);
+    TableLayout {
+        selected,
+        widths,
         padding,
-        options.width,
-        options.border_style,
-    );
-    if options.border_style == BorderStyle::None || options.width < 5 {
-        render_table_line(
-            &mut output,
-            &selected,
-            &widths,
-            padding,
-            |index| Cell::styled(&table.columns[index].label, Style::Muted),
-            table,
-            options.color,
-        );
-        for row in &table.rows {
-            render_table_line(
-                &mut output,
-                &selected,
-                &widths,
-                padding,
-                |index| row[index].clone(),
-                table,
-                options.color,
-            );
-        }
-    } else {
-        render_bordered_table(&mut output, table, &selected, &widths, padding, options);
     }
-    output
 }
 
 fn drop_columns_to_fit(
@@ -170,8 +209,7 @@ fn fitted_widths(
     table: &Table,
     selected: &[usize],
     padding: usize,
-    width: usize,
-    border_style: BorderStyle,
+    options: &RenderOptions,
 ) -> Vec<usize> {
     let mut widths = selected
         .iter()
@@ -180,19 +218,21 @@ fn fitted_widths(
                 .rows
                 .iter()
                 .filter_map(|row| row.get(*index))
-                .map(|cell| display_width(&cell.text))
+                .map(|cell| {
+                    display_width(&format_cell_value(&table.columns[*index], cell, options))
+                })
                 .chain(std::iter::once(display_width(&table.columns[*index].label)))
                 .max()
                 .unwrap_or(1)
                 .max(1)
         })
         .collect::<Vec<_>>();
-    let overhead = if border_style == BorderStyle::None {
+    let overhead = if options.border_style == BorderStyle::None {
         selected.len().saturating_sub(1) * padding
     } else {
         selected.len() * (padding * 2 + 1) + 1
     };
-    let available = width.saturating_sub(overhead).max(selected.len());
+    let available = options.width.saturating_sub(overhead).max(selected.len());
     while widths.iter().sum::<usize>() > available {
         let Some((largest, _)) = widths
             .iter()
@@ -237,7 +277,7 @@ fn border_glyphs(style: BorderStyle) -> BorderGlyphs {
             horizontal: '─',
             vertical: '│',
         },
-        BorderStyle::Sharp => BorderGlyphs {
+        BorderStyle::Light => BorderGlyphs {
             top_left: '┌',
             top_join: '┬',
             top_right: '┐',
@@ -249,6 +289,32 @@ fn border_glyphs(style: BorderStyle) -> BorderGlyphs {
             bottom_right: '┘',
             horizontal: '─',
             vertical: '│',
+        },
+        BorderStyle::Heavy => BorderGlyphs {
+            top_left: '┏',
+            top_join: '┳',
+            top_right: '┓',
+            middle_left: '┣',
+            middle_join: '╋',
+            middle_right: '┫',
+            bottom_left: '┗',
+            bottom_join: '┻',
+            bottom_right: '┛',
+            horizontal: '━',
+            vertical: '┃',
+        },
+        BorderStyle::Double => BorderGlyphs {
+            top_left: '╔',
+            top_join: '╦',
+            top_right: '╗',
+            middle_left: '╠',
+            middle_join: '╬',
+            middle_right: '╣',
+            bottom_left: '╚',
+            bottom_join: '╩',
+            bottom_right: '╝',
+            horizontal: '═',
+            vertical: '║',
         },
         BorderStyle::Ascii | BorderStyle::None => BorderGlyphs {
             top_left: '+',
@@ -283,7 +349,7 @@ fn render_bordered_table(
         glyphs.top_join,
         glyphs.top_right,
         glyphs.horizontal,
-        options.color,
+        options,
     );
     render_bordered_row(
         output,
@@ -294,7 +360,7 @@ fn render_bordered_table(
         glyphs.vertical,
         true,
         None,
-        options.color,
+        options,
     );
     render_border_rule(
         output,
@@ -304,7 +370,7 @@ fn render_bordered_table(
         glyphs.middle_join,
         glyphs.middle_right,
         glyphs.horizontal,
-        options.color,
+        options,
     );
     for row in &table.rows {
         render_bordered_row(
@@ -316,7 +382,7 @@ fn render_bordered_table(
             glyphs.vertical,
             false,
             Some(row),
-            options.color,
+            options,
         );
     }
     render_border_rule(
@@ -327,7 +393,7 @@ fn render_bordered_table(
         glyphs.bottom_join,
         glyphs.bottom_right,
         glyphs.horizontal,
-        options.color,
+        options,
     );
 }
 
@@ -340,7 +406,7 @@ fn render_border_rule(
     join: char,
     right: char,
     horizontal: char,
-    color: bool,
+    options: &RenderOptions,
 ) {
     let mut line = String::new();
     line.push(left);
@@ -351,7 +417,7 @@ fn render_border_rule(
         line.extend(std::iter::repeat(horizontal).take(width + padding * 2));
     }
     line.push(right);
-    output.push_str(&paint(&line, Style::Muted, color));
+    output.push_str(&paint(&line, Style::Muted, options));
     output.push('\n');
 }
 
@@ -365,9 +431,9 @@ fn render_bordered_row(
     vertical: char,
     header: bool,
     row: Option<&[Cell]>,
-    color: bool,
+    options: &RenderOptions,
 ) {
-    output.push_str(&paint(&vertical.to_string(), Style::Muted, color));
+    output.push_str(&paint(&vertical.to_string(), Style::Muted, options));
     for (position, index) in selected.iter().enumerate() {
         output.push_str(&" ".repeat(padding));
         let cell = if header {
@@ -377,11 +443,17 @@ fn render_bordered_row(
                 .cloned()
                 .unwrap_or_else(|| Cell::plain(""))
         };
-        let value = truncate(&cell.text, widths[position]);
+        let value = format_cell_value(&table.columns[*index], &cell, options);
+        let value = truncate(&value, widths[position]);
         let padded = pad(&value, widths[position], table.columns[*index].alignment);
-        output.push_str(&paint(&padded, cell.style, color));
+        output.push_str(&paint_typed_cell(
+            &padded,
+            &cell,
+            &table.columns[*index],
+            options,
+        ));
         output.push_str(&" ".repeat(padding));
-        output.push_str(&paint(&vertical.to_string(), Style::Muted, color));
+        output.push_str(&paint(&vertical.to_string(), Style::Muted, options));
     }
     output.push('\n');
 }
@@ -393,7 +465,7 @@ fn render_table_line<F>(
     padding: usize,
     cell_at: F,
     table: &Table,
-    color: bool,
+    options: &RenderOptions,
 ) where
     F: Fn(usize) -> Cell,
 {
@@ -402,7 +474,8 @@ fn render_table_line<F>(
             output.push_str(&" ".repeat(padding));
         }
         let cell = cell_at(*index);
-        let value = truncate(&cell.text, widths[position]);
+        let value = format_cell_value(&table.columns[*index], &cell, options);
+        let value = truncate(&value, widths[position]);
         let padded = if position + 1 == selected.len()
             && table.columns[*index].alignment == Alignment::Left
         {
@@ -410,7 +483,12 @@ fn render_table_line<F>(
         } else {
             pad(&value, widths[position], table.columns[*index].alignment)
         };
-        output.push_str(&paint(&padded, cell.style, color));
+        output.push_str(&paint_typed_cell(
+            &padded,
+            &cell,
+            &table.columns[*index],
+            options,
+        ));
     }
     output.push('\n');
 }
@@ -445,7 +523,7 @@ fn render_logs(records: &[LogRecord], options: &RenderOptions) -> String {
             output.push_str(&paint(
                 &truncate(&combined, options.width),
                 record.style,
-                options.color,
+                options,
             ));
             output.push('\n');
             continue;
@@ -463,7 +541,7 @@ fn render_logs(records: &[LogRecord], options: &RenderOptions) -> String {
                     Alignment::Left,
                 ),
                 Style::Muted,
-                options.color,
+                options,
             ));
             output.push(' ');
         }
@@ -472,7 +550,7 @@ fn render_logs(records: &[LogRecord], options: &RenderOptions) -> String {
             output.push_str(&paint(
                 &pad(&truncate(level, level_width), level_width, Alignment::Left),
                 record.style,
-                options.color,
+                options,
             ));
             output.push(' ');
         }
@@ -486,7 +564,7 @@ fn render_logs(records: &[LogRecord], options: &RenderOptions) -> String {
             } else {
                 Style::Plain
             },
-            options.color,
+            options,
         ));
         output.push('\n');
     }
@@ -530,21 +608,164 @@ fn pad(value: &str, width: usize, alignment: Alignment) -> String {
     }
 }
 
-fn paint(value: &str, style: Style, enabled: bool) -> String {
-    if !enabled || style == Style::Plain || value.trim().is_empty() {
+fn paint(value: &str, style: Style, options: &RenderOptions) -> String {
+    if !options.color || style == Style::Plain || value.trim().is_empty() {
         return value.to_owned();
     }
-    let code = match style {
-        Style::Plain => return value.to_owned(),
-        Style::Muted => "2;37",
-        Style::Accent => "1;36",
-        Style::Good => "32",
-        Style::Warning => "33",
-        Style::Error => "1;31",
-        Style::Info => "34",
-        Style::Debug => "2;35",
-    };
+    let code = style_code(style, options);
     format!("\x1b[{code}m{value}\x1b[0m")
+}
+
+fn style_code(style: Style, options: &RenderOptions) -> &'static str {
+    if options.truecolor {
+        return match (options.palette, style) {
+            (_, Style::Plain) => "0",
+            (_, Style::Muted) => "2;38;2;148;163;184",
+            (_, Style::Accent) => "1;38;2;34;211;238",
+            (ColorPalette::Default, Style::Good) => "38;2;34;197;94",
+            (ColorPalette::Default, Style::Warning) => "38;2;250;204;21",
+            (ColorPalette::Default, Style::Error) => "1;38;2;248;113;113",
+            (ColorPalette::Default, Style::Info) => "38;2;96;165;250",
+            (ColorPalette::Default, Style::Debug) => "2;38;2;192;132;252",
+            (ColorPalette::Colorblind, Style::Good) => "38;2;86;180;233",
+            (ColorPalette::Colorblind, Style::Warning) => "38;2;240;228;66",
+            (ColorPalette::Colorblind, Style::Error) => "1;38;2;204;121;167",
+            (ColorPalette::Colorblind, Style::Info) => "38;2;0;158;115",
+            (ColorPalette::Colorblind, Style::Debug) => "2;38;2;213;94;0",
+        };
+    }
+    match (options.palette, style) {
+        (_, Style::Plain) => "0",
+        (_, Style::Muted) => "2;37",
+        (_, Style::Accent) => "1;36",
+        (ColorPalette::Default, Style::Good) => "32",
+        (ColorPalette::Default, Style::Warning) => "33",
+        (ColorPalette::Default, Style::Error) => "1;31",
+        (ColorPalette::Default, Style::Info) => "34",
+        (ColorPalette::Default, Style::Debug) => "2;35",
+        (ColorPalette::Colorblind, Style::Good) => "34",
+        (ColorPalette::Colorblind, Style::Warning) => "33",
+        (ColorPalette::Colorblind, Style::Error) => "1;35",
+        (ColorPalette::Colorblind, Style::Info) => "36",
+        (ColorPalette::Colorblind, Style::Debug) => "2;31",
+    }
+}
+
+fn paint_cell(value: &str, cell: &Cell, options: &RenderOptions) -> String {
+    if !options.color || value.trim().is_empty() {
+        return value.to_owned();
+    }
+    let change = match (options.palette, options.truecolor, cell.change) {
+        (_, _, None) => None,
+        (ColorPalette::Default, false, Some(ChangeKind::Added)) => Some("30;42"),
+        (ColorPalette::Default, false, Some(ChangeKind::Removed)) => Some("30;41"),
+        (ColorPalette::Default, false, Some(ChangeKind::Changed)) => Some("30;43"),
+        (ColorPalette::Colorblind, false, Some(ChangeKind::Added)) => Some("37;44"),
+        (ColorPalette::Colorblind, false, Some(ChangeKind::Removed)) => Some("37;45"),
+        (ColorPalette::Colorblind, false, Some(ChangeKind::Changed)) => Some("30;43"),
+        (ColorPalette::Default, true, Some(ChangeKind::Added)) => Some("30;48;2;34;197;94"),
+        (ColorPalette::Default, true, Some(ChangeKind::Removed)) => Some("30;48;2;248;113;113"),
+        (ColorPalette::Default, true, Some(ChangeKind::Changed)) => Some("30;48;2;250;204;21"),
+        (ColorPalette::Colorblind, true, Some(ChangeKind::Added)) => Some("30;48;2;86;180;233"),
+        (ColorPalette::Colorblind, true, Some(ChangeKind::Removed)) => Some("30;48;2;204;121;167"),
+        (ColorPalette::Colorblind, true, Some(ChangeKind::Changed)) => Some("30;48;2;240;228;66"),
+    };
+    change
+        .map(|code| format!("\x1b[{code}m{value}\x1b[0m"))
+        .unwrap_or_else(|| paint(value, cell.style, options))
+}
+
+fn paint_typed_cell(
+    value: &str,
+    cell: &Cell,
+    column: &crate::model::Column,
+    options: &RenderOptions,
+) -> String {
+    if column.value_type != ValueType::Permissions || !options.color || cell.change.is_some() {
+        return paint_cell(value, cell, options);
+    }
+    let mut output = String::new();
+    for ch in value.chars() {
+        let style = match ch {
+            'd' | 'l' => Style::Accent,
+            'r' => Style::Good,
+            'w' => Style::Warning,
+            'x' | 's' | 't' => Style::Info,
+            '-' => Style::Muted,
+            _ => Style::Plain,
+        };
+        output.push_str(&paint(&ch.to_string(), style, options));
+    }
+    output
+}
+
+pub(crate) fn format_cell_value(
+    column: &crate::model::Column,
+    cell: &Cell,
+    options: &RenderOptions,
+) -> String {
+    match column.value_type {
+        ValueType::Percentage if options.width >= options.breakpoints.core => {
+            let Some(value) = cell.text.trim().trim_end_matches('%').parse::<f64>().ok() else {
+                return cell.text.clone();
+            };
+            let mut rendered = format!("{} {}", cell.text, gauge_bar(value, 8));
+            if options.width >= options.breakpoints.wide && !cell.trend.is_empty() {
+                rendered.push(' ');
+                rendered.push_str(&sparkline(&cell.trend));
+            }
+            rendered
+        }
+        ValueType::Timestamp => relative_timestamp(&cell.text, options),
+        ValueType::Text | ValueType::Permissions | ValueType::Percentage => cell.text.clone(),
+    }
+}
+
+fn gauge_bar(value: f64, width: usize) -> String {
+    const RAMP: [char; 8] = ['▏', '▎', '▍', '▌', '▋', '▊', '▉', '█'];
+    let eighths = ((value.clamp(0.0, 100.0) / 100.0) * (width * 8) as f64).round() as usize;
+    let full = (eighths / 8).min(width);
+    let partial = eighths % 8;
+    let mut output = "█".repeat(full);
+    if full < width && partial > 0 {
+        output.push(RAMP[partial - 1]);
+    }
+    let occupied = full + usize::from(full < width && partial > 0);
+    output.push_str(&" ".repeat(width.saturating_sub(occupied)));
+    output
+}
+
+fn sparkline(samples: &[u64]) -> String {
+    const BARS: [char; 8] = ['▁', '▂', '▃', '▄', '▅', '▆', '▇', '█'];
+    samples
+        .iter()
+        .map(|sample| BARS[((sample.min(&100) * 7) / 100) as usize])
+        .collect()
+}
+
+fn relative_timestamp(value: &str, options: &RenderOptions) -> String {
+    let Ok(timestamp) = value.parse::<u64>() else {
+        return value.to_owned();
+    };
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+    let seconds = now.saturating_sub(timestamp);
+    let relative = if seconds < 60 {
+        format!("{seconds}s ago")
+    } else if seconds < 3_600 {
+        format!("{}m ago", seconds / 60)
+    } else if seconds < 86_400 {
+        format!("{}h ago", seconds / 3_600)
+    } else {
+        format!("{}d ago", seconds / 86_400)
+    };
+    if options.width > options.breakpoints.wide {
+        format!("{relative} ({value})")
+    } else {
+        relative
+    }
 }
 
 #[cfg(test)]
@@ -556,6 +777,23 @@ mod tests {
         assert_eq!(truncate("hello", 4), "hel…");
         assert_eq!(truncate("界面", 3), "界…");
         assert_eq!(display_width(&truncate("🦀 crab", 5)), 5);
+    }
+
+    #[test]
+    fn gauges_use_fractional_block_cells() {
+        assert_eq!(gauge_bar(0.0, 8), "        ");
+        assert_eq!(gauge_bar(1.0, 8), "▏       ");
+        assert_eq!(gauge_bar(47.0, 8), "███▊    ");
+        assert_eq!(gauge_bar(100.0, 8), "████████");
+    }
+
+    #[test]
+    fn all_named_border_styles_have_distinct_glyph_sets() {
+        assert_eq!(border_glyphs(BorderStyle::Light).top_left, '┌');
+        assert_eq!(border_glyphs(BorderStyle::Rounded).top_left, '╭');
+        assert_eq!(border_glyphs(BorderStyle::Heavy).top_left, '┏');
+        assert_eq!(border_glyphs(BorderStyle::Double).top_left, '╔');
+        assert_eq!(border_glyphs(BorderStyle::Ascii).top_left, '+');
     }
 
     #[test]
@@ -583,6 +821,8 @@ mod tests {
                         wide: 160,
                     },
                     border_style: BorderStyle::Rounded,
+                    palette: ColorPalette::Default,
+                    truecolor: false,
                 },
             );
             assert!(

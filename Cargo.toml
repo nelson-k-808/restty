@@ -9,6 +9,8 @@ keywords = ["cli", "terminal", "table", "formatter"]
 categories = ["command-line-utilities"]
 
 [dependencies]
+crossterm = "0.27"
+ratatui = { version = "0.26", default-features = false, features = ["crossterm"] }
 unicode-width = "0.2"
 
 [profile.release]

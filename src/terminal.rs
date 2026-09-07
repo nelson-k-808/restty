@@ -9,6 +9,43 @@ pub fn formatting_disabled() -> bool {
     env::var_os("NO_COLOR").is_some() || env::var("RESTTY_DISABLE").ok().as_deref() == Some("1")
 }
 
+pub fn supports_unicode(profile: &str) -> bool {
+    match profile {
+        "ascii" => false,
+        "unicode" | "truecolor" | "ansi16" => true,
+        _ => {
+            if env::var("TERM").ok().as_deref() == Some("dumb") {
+                return false;
+            }
+            env::var("LC_ALL")
+                .ok()
+                .or_else(|| env::var("LC_CTYPE").ok())
+                .or_else(|| env::var("LANG").ok())
+                .map(|locale| {
+                    let locale = locale.to_ascii_lowercase();
+                    locale.contains("utf-8") || locale.contains("utf8")
+                })
+                .unwrap_or(true)
+        }
+    }
+}
+
+pub fn supports_truecolor(profile: &str) -> bool {
+    match profile {
+        "truecolor" => true,
+        "ascii" | "ansi16" | "unicode" => false,
+        _ => {
+            let colorterm = env::var("COLORTERM")
+                .unwrap_or_default()
+                .to_ascii_lowercase();
+            let term = env::var("TERM").unwrap_or_default().to_ascii_lowercase();
+            matches!(colorterm.as_str(), "truecolor" | "24bit")
+                || term.contains("truecolor")
+                || term.contains("direct")
+        }
+    }
+}
+
 #[repr(C)]
 #[derive(Default)]
 struct WinSize {

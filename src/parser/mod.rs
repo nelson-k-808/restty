@@ -1,10 +1,59 @@
 mod builtins;
 mod generic;
+mod jc;
 mod util;
 
 use std::collections::HashSet;
 
 use crate::model::{ParsedView, View};
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ActionKind {
+    OpenPath,
+    TerminateProcess,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct ActionSpec {
+    pub label: &'static str,
+    pub value_key: &'static str,
+    pub kind: ActionKind,
+}
+
+const LS_ACTIONS: &[ActionSpec] = &[ActionSpec {
+    label: "open",
+    value_key: "name",
+    kind: ActionKind::OpenPath,
+}];
+
+const PS_ACTIONS: &[ActionSpec] = &[ActionSpec {
+    label: "terminate",
+    value_key: "pid",
+    kind: ActionKind::TerminateProcess,
+}];
+
+pub fn actions_for(source: &str) -> &'static [ActionSpec] {
+    match source {
+        "ls" => LS_ACTIONS,
+        "ps" => PS_ACTIONS,
+        _ => &[],
+    }
+}
+
+pub fn key_columns(source: &str) -> &'static [&'static str] {
+    match source {
+        "ls" => &["name"],
+        "ps" => &["pid"],
+        "df" => &["mounted", "filesystem"],
+        "du" => &["path"],
+        "git" => &["path", "commit"],
+        "docker" => &["container_id", "names"],
+        "lsblk" => &["name"],
+        "free" => &["type"],
+        "ip" => &["destination"],
+        _ => &[],
+    }
+}
 
 pub trait Parser: Send + Sync {
     fn name(&self) -> &'static str;
@@ -24,6 +73,7 @@ impl ParserRegistry {
         let disabled = disabled.iter().map(String::as_str).collect::<HashSet<_>>();
         let parsers = builtins::all()
             .into_iter()
+            .chain(jc::all())
             .chain(generic::all())
             .filter(|parser| !disabled.contains(parser.name()))
             .collect();

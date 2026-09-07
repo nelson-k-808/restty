@@ -5,6 +5,14 @@ pub enum Alignment {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ValueType {
+    Text,
+    Percentage,
+    Timestamp,
+    Permissions,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Style {
     Plain,
     Muted,
@@ -16,12 +24,20 @@ pub enum Style {
     Debug,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ChangeKind {
+    Added,
+    Removed,
+    Changed,
+}
+
 #[derive(Debug, Clone)]
 pub struct Column {
     pub key: String,
     pub label: String,
     pub priority: u8,
     pub alignment: Alignment,
+    pub value_type: ValueType,
 }
 
 impl Column {
@@ -31,7 +47,13 @@ impl Column {
             label: label.into(),
             priority,
             alignment,
+            value_type: ValueType::Text,
         }
+    }
+
+    pub fn with_value_type(mut self, value_type: ValueType) -> Self {
+        self.value_type = value_type;
+        self
     }
 }
 
@@ -39,6 +61,8 @@ impl Column {
 pub struct Cell {
     pub text: String,
     pub style: Style,
+    pub change: Option<ChangeKind>,
+    pub trend: Vec<u64>,
 }
 
 impl Cell {
@@ -46,6 +70,8 @@ impl Cell {
         Self {
             text: text.into(),
             style: Style::Plain,
+            change: None,
+            trend: Vec::new(),
         }
     }
 
@@ -53,7 +79,19 @@ impl Cell {
         Self {
             text: text.into(),
             style,
+            change: None,
+            trend: Vec::new(),
         }
+    }
+
+    pub fn with_change(mut self, change: ChangeKind) -> Self {
+        self.change = Some(change);
+        self
+    }
+
+    pub fn with_trend(mut self, trend: Vec<u64>) -> Self {
+        self.trend = trend;
+        self
     }
 }
 

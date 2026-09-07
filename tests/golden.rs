@@ -46,7 +46,10 @@ fn parser_and_width_goldens() {
 
 #[test]
 fn polished_border_golden() {
-    let config = Config::default();
+    let config = Config {
+        terminal_profile: "unicode".into(),
+        ..Config::default()
+    };
     let output = render_bytes_with_policy(
         include_str!("fixtures/ps.txt").as_bytes(),
         &RunOptions {

@@ -7,9 +7,11 @@ max_lines = 10000
 max_bytes = 8388608
 min_confidence = 0.72
 
-# `none` keeps responsive layout but disables restty's ANSI colors.
+# `colorblind` selects a blue/yellow/magenta palette; `none` disables colors.
 theme = "default"
-border_style = "rounded" # rounded, sharp, ascii, or none
+border_style = "rounded" # heavy, light, rounded, double, ascii, or none
+terminal_profile = "auto" # auto, unicode, truecolor, ansi16, or ascii
+watch_samples = 20 # in-memory samples retained per gauge while watching
 
 [breakpoints]
 compact = 60
@@ -25,3 +27,8 @@ mode = 2
 owner = 2
 group = 3
 links = 3
+
+# Numeric and percentage cells can override parser-assigned semantic styles.
+[thresholds.df.use]
+warning = 75
+error = 90

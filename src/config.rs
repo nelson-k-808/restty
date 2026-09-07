@@ -5,6 +5,12 @@ use std::path::PathBuf;
 
 use crate::model::View;
 
+#[derive(Debug, Clone, Default)]
+pub struct ThresholdRule {
+    pub warning: Option<f64>,
+    pub error: Option<f64>,
+}
+
 #[derive(Debug, Clone, Copy)]
 pub struct Breakpoints {
     pub compact: usize,
@@ -21,8 +27,11 @@ pub struct Config {
     pub min_confidence: f32,
     pub theme: String,
     pub border_style: String,
+    pub terminal_profile: String,
+    pub watch_samples: usize,
     pub breakpoints: Breakpoints,
     pub column_priorities: HashMap<String, HashMap<String, u8>>,
+    pub thresholds: HashMap<String, HashMap<String, ThresholdRule>>,
 }
 
 impl Default for Config {
@@ -40,12 +49,15 @@ impl Default for Config {
             min_confidence: 0.72,
             theme: "default".into(),
             border_style: "rounded".into(),
+            terminal_profile: "auto".into(),
+            watch_samples: 20,
             breakpoints: Breakpoints {
                 compact: 60,
                 core: 100,
                 wide: 160,
             },
             column_priorities: HashMap::new(),
+            thresholds: HashMap::new(),
         }
     }
 }
@@ -117,6 +129,12 @@ impl Config {
                     }
                     "theme" => self.theme = unquote(value).to_owned(),
                     "border_style" => self.border_style = unquote(value).to_owned(),
+                    "terminal_profile" => self.terminal_profile = unquote(value).to_owned(),
+                    "watch_samples" => {
+                        if let Ok(samples) = value.parse::<usize>() {
+                            self.watch_samples = samples.clamp(2, 1_024);
+                        }
+                    }
                     _ => {}
                 },
                 "breakpoints" => match key {
@@ -132,6 +150,26 @@ impl Config {
                             .entry(command)
                             .or_default()
                             .insert(key.to_owned(), priority);
+                    }
+                }
+                _ if section.starts_with("thresholds.") => {
+                    let path = section.trim_start_matches("thresholds.");
+                    let Some((command, column)) = path.split_once('.') else {
+                        continue;
+                    };
+                    let Ok(number) = value.parse::<f64>() else {
+                        continue;
+                    };
+                    let rule = self
+                        .thresholds
+                        .entry(command.to_owned())
+                        .or_default()
+                        .entry(column.to_owned())
+                        .or_default();
+                    match key {
+                        "warning" => rule.warning = Some(number),
+                        "error" => rule.error = Some(number),
+                        _ => {}
                     }
                 }
                 _ => {}
@@ -154,6 +192,39 @@ impl Config {
         for column in &mut table.columns {
             if let Some(priority) = overrides.get(&column.key) {
                 column.priority = *priority;
+            }
+        }
+    }
+
+    pub fn apply_thresholds(&self, source: &str, view: &mut View) {
+        let View::Table(table) = view else {
+            return;
+        };
+        let Some(rules) = self.thresholds.get(source) else {
+            return;
+        };
+        for (index, column) in table.columns.iter().enumerate() {
+            let Some(rule) = rules.get(&column.key) else {
+                continue;
+            };
+            for row in &mut table.rows {
+                let Some(cell) = row.get_mut(index) else {
+                    continue;
+                };
+                let Ok(value) = cell
+                    .text
+                    .trim()
+                    .trim_end_matches('%')
+                    .replace(',', "")
+                    .parse::<f64>()
+                else {
+                    continue;
+                };
+                if rule.error.is_some_and(|threshold| value >= threshold) {
+                    cell.style = crate::model::Style::Error;
+                } else if rule.warning.is_some_and(|threshold| value >= threshold) {
+                    cell.style = crate::model::Style::Warning;
+                }
             }
         }
     }
@@ -243,5 +314,27 @@ mod tests {
         };
         config.normalize_enabled_commands();
         assert_eq!(config.enabled_commands, ["ip", "free"]);
+    }
+
+    #[test]
+    fn threshold_rules_override_numeric_cell_styles() {
+        use crate::model::{Alignment, Cell, Column, Style, Table};
+        let mut config = Config::default();
+        config.merge_toml_subset(
+            "terminal_profile = \"ascii\"\nwatch_samples = 32\n[thresholds.df.use]\nwarning = 75\nerror = 90\n",
+        );
+        assert_eq!(config.terminal_profile, "ascii");
+        assert_eq!(config.watch_samples, 32);
+        let mut view = View::Table(Table {
+            columns: vec![Column::new("use", "USE", 0, Alignment::Right)],
+            rows: vec![vec![Cell::plain("76%")], vec![Cell::plain("91%")]],
+            prelude: Vec::new(),
+        });
+        config.apply_thresholds("df", &mut view);
+        let View::Table(table) = view else {
+            panic!("expected table");
+        };
+        assert_eq!(table.rows[0][0].style, Style::Warning);
+        assert_eq!(table.rows[1][0].style, Style::Error);
     }
 }

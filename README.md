@@ -16,6 +16,8 @@ The Model A wrapper architecture is implemented for bash and zsh. Built-in
 parsers cover GNU/BSD-shaped `ls -la`, `ps aux`, `df -h`, `du -sh`, `git status
 --short`, `git log --oneline`, and `docker ps` output. Unknown commands can use
 the conservative aligned-table, key/value, and structured-log fallback parsers.
+When `jc` is installed, restty automatically adds source-keyed `jc` adapters
+between its dedicated parsers and those generic fallbacks.
 
 Transparent PTY interception (Model B) and live `--follow` rendering are not
 part of v1. See [Architecture](docs/architecture.md).
@@ -94,9 +96,10 @@ is returned after the viewer closes.
 Command output is parsed once when the viewer opens, then retained while the
 terminal is resized. Resize updates recalculate only the layout, are coalesced
 to avoid redraw storms, capped near 60 frames per second during continuous
-dragging, and emitted as one synchronized update. Only changed terminal rows are
-rewritten, avoiding the full-screen clear flash that makes bordered tables
-appear to jitter. Scrolling at the same width reuses the rendered line cache.
+dragging, and emitted through one ratatui `Terminal::draw`. Ratatui's
+double-buffered crossterm backend rewrites only changed terminal cells, avoiding
+the full-screen clear flash that makes bordered tables appear to jitter.
+Scrolling at the same width reuses the responsive layout cache.
 
 To make the existing safe automatic wrappers open the viewer:
 
@@ -115,7 +118,65 @@ Live mode intentionally bypasses editors, pagers, SSH, terminal UIs, and
 follow-mode commands. When stdin or stdout is redirected, it degrades to direct
 execution instead of emitting terminal-control sequences.
 
-`--force` only opts redirected stdout into formatting. `NO_COLOR` and
+### Structured output
+
+Parsed rows can be emitted using their stable column keys. `--format` is an
+explicit scripting mode, so it works when stdout is redirected without also
+requiring `--force`:
+
+```sh
+restty run --format=json -- lsblk
+restty run --format=csv -- ps aux
+ip route | restty render --source=ip --format=yaml
+```
+
+JSON, CSV, and YAML share the same bounded parser path as terminal rendering.
+Invalid UTF-8, oversized input, disabled formatting, an unknown source, or a
+rejected parse still produces the original bytes unchanged.
+
+### Explore, snapshots, and watch
+
+Explore adds local sorting, filtering, and row selection without rerunning the
+command:
+
+```sh
+restty explore -- ps aux
+```
+
+Press `/` to edit the filter, `s` or Tab to move to the next sort column, `r`
+to reverse sorting, arrows or `j`/`k` to select a row, `a` to invoke a
+parser-declared row action when available, and `q` to exit. Actions temporarily
+restore the main screen and ordinary terminal mode while their child runs.
+
+Successful explicit command parses are cached opportunistically. Cache failure
+never changes command behavior:
+
+```sh
+restty last
+restty snapshot before-upgrade
+restty diff before-upgrade
+restty diff before-upgrade -- ps aux
+```
+
+Snapshots are stored without overwriting an existing name. Diff output marks
+added rows green, removed rows red, and changed cells yellow. Without an
+explicit command, `diff` safely reruns the argv recorded by the snapshot.
+
+Watch safely reruns a bounded, non-interactive command and applies the same diff
+model between refreshes:
+
+```sh
+restty watch --interval 2 -- ps aux
+restty watch --interval 5 --alert '90%' -- df -h
+```
+
+Press Space for an immediate refresh. Alerts ring once per viewer session.
+Interactive programs and known follow modes remain denied. Gauge histories are
+bounded by `watch_samples`, live only in the watch process, and appear as
+sparklines at wide breakpoints.
+
+`--force` only opts redirected stdout into formatting. `--border` overrides the
+configured table style for one invocation. `NO_COLOR` and
 `RESTTY_DISABLE=1` remain absolute passthrough switches. `--width` is useful
 for snapshots and `--color=auto|always|never` controls restty's own styling.
 
@@ -125,8 +186,8 @@ moderate padding; wider terminals receive more padding. Every invocation reads
 the live TTY width via `ioctl`.
 
 Tables use rounded Unicode borders and styled headers by default. Set
-`border_style` to `sharp`, `ascii`, or `none` when a different terminal style
-is preferable. Borders, padding, and truncated cells are all included in the
+`border_style` to `heavy`, `light`, `double`, `ascii`, or `none` when a
+different terminal style is preferable. Borders, padding, and truncated cells are all included in the
 width calculation, so a rendered row never exceeds the detected terminal.
 
 ## Configuration
@@ -140,8 +201,10 @@ disabled_parsers = []
 max_lines = 10000
 max_bytes = 8388608
 min_confidence = 0.72
-theme = "default" # or "none"
-border_style = "rounded" # rounded, sharp, ascii, or none
+theme = "default" # default, colorblind, or none
+border_style = "rounded" # heavy, light, rounded, double, ascii, or none
+terminal_profile = "auto" # auto, unicode, truecolor, ansi16, or ascii
+watch_samples = 20
 
 [breakpoints]
 compact = 60
@@ -151,6 +214,10 @@ wide = 160
 [columns.ls]
 name = 0
 owner = 2
+
+[thresholds.df.use]
+warning = 75
+error = 90
 ```
 
 `RESTTY_ENABLED_CMDS="ls,ps,df,git"` overrides the configured command list for
@@ -167,6 +234,14 @@ quick per-shell changes. Column priority zero is most important. Built-in keys:
 
 Invalid or unknown config entries are ignored silently so a configuration
 mistake cannot interfere with command output.
+
+Percentage columns render compact inline bars at full-column breakpoints.
+Threshold rules override their semantic warning/error style independently of
+responsive column selection. In `auto` mode, a `dumb` or non-UTF-8 terminal
+falls back from Unicode borders to ASCII; `terminal_profile = "ascii"` forces
+that behavior. The `colorblind` theme uses a blue/yellow/magenta palette, and
+truecolor automatically degrades to ANSI colors when terminal capabilities
+require it.
 
 ## Adding a parser
 

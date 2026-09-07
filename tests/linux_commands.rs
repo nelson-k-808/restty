@@ -10,7 +10,10 @@ const CASES: &[(&str, &str, &str)] = &[
 
 #[test]
 fn common_linux_commands_render_responsively() {
-    let config = Config::default();
+    let config = Config {
+        terminal_profile: "unicode".into(),
+        ..Config::default()
+    };
     for (source, input, wide_heading) in CASES {
         for width in [32, 72, 120] {
             let output = render_bytes_with_policy(
